@@ -1,0 +1,316 @@
+#define function balanceOf(address user) view returns (uint256)
+#define function allowance(address owner, address spender) view returns (uint256)
+#define function mint(uint256 amount) nonpayable returns ()
+#define function transfer(address to, uint256 amount) nonpayable returns (bool)
+#define function approve(address spender, uint256 amount) nonpayable returns (bool)
+#define function transferFrom(address from, address to, uint256 amount) nonpayable returns (bool)
+
+#define constant balances = FREE_STORAGE_POINTER() 
+#define constant allowances = FREE_STORAGE_POINTER()
+
+#define error INSUFFICIENT_BALANCE()
+#define error INSUFFICIENT_ALLOWANCE()
+
+#define macro balanceOf() = takes(0) returns (1) {
+    0x04 calldataload   //loads the first 32 bytes starting from 4th byte
+                        //[address of the user]
+    0x20                //push 0x20 onto the stack
+    mstore              //stores address to memory at 0x20
+
+    [balances]          //get storage slot
+    0x00                //push 00
+    mstore              //save slot at 00 memory offset
+                        //[0x1, address] - in memory
+
+    0x40                //size of the mem to hash (0x40 = 64 bytes)
+    0x00                //memory offset to start hashing from (0x00)
+    sha3                //keccak256 hash of the data 
+                        //[hash of the balances_slot.userAddress]
+
+    sload               //loads balance from the slot
+    0x00                //start position in the memory to store in memory
+    mstore
+
+    0x20                //32 bytes from the start of the memory
+    0x00                //balance is in 0x00 in memory
+    return
+}
+
+#define macro MINT() = takes(0) returns (0) {
+    
+    caller          //get the address of the caller
+    0x20            //push 0x20 onto the stack
+    mstore          //stores address to memory at 0x20
+    
+    [balances]      //get storage slot
+    0x00            //push 00
+    mstore          //save slot at 00 memory offset
+    
+    0x40            //size of the mem to hash (0x40 = 64 bytes)
+    0x00            //memory offset to start hashing from (0x00)
+    sha3            //keccak256 hash of the data 
+                    //[balanceSlot]
+    dup1            //[balanceSlot, balanceSlot]
+    sload           //[balance, balanceSlot]
+
+    0x04 calldataload  //[amountToMint, balance, balanceSlot]
+    add             //[newbalance, balanceSlot]
+    swap1           //[balanceSlot, newbalance]
+   
+    sstore          //stores the new balance to the slot
+}
+
+#define macro TRANSFER() = takes(0) returns(1) {
+    0x24 calldataload   //loads the amount from calldata
+    
+
+    caller          //msg.sender
+    0x20            //push 0x20 onto the stack
+    mstore          //stores address to memory at 0x20
+
+    [balances]
+    0x00            //push 00
+    mstore          //save slot at 00 memory offset
+                    //[0x1, address] - in memory
+
+    0x40            //size of the mem to hash (0x40 = 64 bytes)
+    0x00            //memory offset to start hashing from (0x00)
+    sha3            //keccak256 hash of the data 
+                    //[hash of the balances_slot.userAddress]
+    dup1            //duplicate the hash
+    0x00
+    mstore          //save the hash to memory at 0x00
+                    //[hash, amountToSend]
+    sload           //[balance, amountToSend]
+        
+    dup1            //[balance, balance, amountToSend]
+    0x20
+    mstore          //saves the balance to memory
+                    //[balance, amountToSend]
+    lt revertTx jumpi //if balance < amountToSend jump to revertTx
+
+    0x24 calldataload   //loads the amount from calldata //[amount]
+    0x20 mload      //load user balance from memory  //[balance, amount]
+    sub            //subtract amount from balance //[balance - amount]
+                    //[newSenderBalance]
+    0x00 mload      //get caller balance slot
+                    //[senderSlot, newSenderBalance]       
+    sstore          //save new sender balance to slot
+                    
+    // update user2 balance
+    [balances]
+    0x00            //push 00
+    mstore          //save slot at 00 memory offset
+                    //[0x1, address] - in memory
+    0x04 calldataload //loads user2 address from calldata
+    0x20 mstore      //save user2 address to memory at 0x20
+
+    0x40
+    0x00
+    sha3            //get receiver balance slot
+    dup1            //[receiverSlot, receiverSlot]
+    sload           //[receiverBalance, receiverSlot]
+
+    0x24 calldataload   //loads the amount from calldata //[amount, receiverBalance, receiverSlot]
+    add             //add amount to receiverBalance //[amount + receiverBalance]
+                    //[newReceiverBalance, receiverSlot]
+    swap1           //[receiverSlot, newReceiverBalance]
+    sstore          //save new receiver balance
+
+    //return true
+    0x01 0x00 mstore
+    0x20 0x00 return
+
+    revertTx:
+    __ERROR(INSUFFICIENT_BALANCE) //[err_selector, ...]
+    0x00 mstore
+    
+    0x04        //revert with 4 bytes ERR signature
+    0x00
+    revert
+
+}
+
+#define macro ALLOWANCE(return_data_ptr) = takes(2) returns (1) {
+    //[owner, spender]
+    [allowances]    //[allowances_slot, owner, spender]
+    0x00            //[0x00, allowances_slot, owner, spender]
+    mstore          //[owner, spender]
+
+    0x20 mstore    //[spender]
+
+    0x40 0x00 sha3 //[owner_hash, spender]
+    0x00 mstore    //[spender]
+    
+    0x20            //[0x00, spender]
+    mstore          //[]
+
+    0x40 0x00 sha3 //[allowances_hash]
+    sload           //[allowance]
+
+    <return_data_ptr> mstore    //store allowance to memory
+}
+
+#define macro APPROVE() = takes(2) returns (1) {
+    //[spender, amount]
+    caller          //[owner, spender, amount]
+    [allowances]    //[allowances_slot, owner, spender, amount]
+    0x00            //[0x00, allowances_slot, owner, spender, amount]
+    mstore          //[owner, spender, amount]
+    
+    0x20 mstore    //[spender, amount]
+    
+    0x40 0x00 sha3 //[owner_hash, spender, amount]
+    0x00 mstore    //[spender, amount]
+    
+    0x20            //[0x20, spender, amount]
+    mstore          //[amount]
+    
+    0x40 0x00 sha3 //[allowances_hash, amount]
+    sstore           //[]
+    
+    0x01 0x00 mstore    //return true
+    0x20 0x00 return
+}
+
+#define macro TRANSFER_FROM() = takes(3) returns (2) {
+    //check approval
+    //[owner, amount, to ]
+    caller              //[spender, owner, amount, to]
+    swap1               //[owner, spender, amount, to] 
+    ALLOWANCE(0x00)     //saves allowance amt to 0x00 in memory
+                        //[amount, to]
+    0x00 mload         //[allowanceAmt, amount, to]
+
+    lt revertTx jumpi  //[to]
+
+    //reduce allowance
+    [allowances] 0x00 mstore       //[to]
+    0x04 calldataload              //[owner, to]
+    0x20 mstore                    //[to]
+    0x40 0x00 sha3                 //[owner_hash, to]
+    0x00 mstore                    //[to]
+    caller                         //[spender, to]
+    0x20 mstore                    //[to] 
+    0x40 0x00 sha3                 //[allowance_slot, to]
+    dup1                           //[allowance_slot, allowance_slot, to]
+    sload                          //[allowance, allowance_slot, to]
+    0x44 calldataload              //[amount, allowance, allowance_slot, to]
+    swap1                           //[allowance, amount, allowance_slot, to]
+    sub                             //[newAllowance, allowance_slot, to]
+    swap1                           //[allowance_slot, newAllowance, to]
+    sstore                          //[to]
+
+
+    //transfer()
+    0x04 calldataload   //[from, to]
+    0x44 calldataload   //[amt, from, to]
+
+    _TRANSFER()         //`return` inside transfer()
+
+
+    revertTx:
+        __ERROR(INSUFFICIENT_ALLOWANCE) //[err_selector, ...]
+        0x00 mstore
+        0x04 0x00 revert
+}
+
+#define macro _TRANSFER() = takes(3) returns (1) {
+    //[amt, from, to]
+    dup1                        //[amt, amt, from, to]
+    0x60 mstore                 //[amt, from, to]
+    swap1                       //[from, amt, to]
+
+    [balances] 0x00 mstore      //[from, amt, to]
+    0x20 mstore                  //[amt, to]
+    dup1                         //[amt, amt, to]
+    0x40 0x00 sha3               //[slot, amt, am, to]
+    
+
+    //update `from` balance      //[slot, amt, amt, to] //extra amount in stack in comments
+    dup1                        //[slot, slot, amt, amt, to]
+    0x00 mstore                 //[slot, amt, amt, to]
+    sload                       //[balance, amt, amt, to]
+    dup1                        //[balance, balance, amt, amt, to]
+    0x20 mstore                 //[balance, amt, amt, to]
+    lt revertTx jumpi           //if balance < amount jump to revertTx
+    0x20 mload                  //[balance, amt, to]
+    sub                         //[newBalance, to]
+    0x00 mload                  //[slot, newBalance, to]
+    sstore                      //[to]
+
+    //update `to` balance
+    [balances] 0x00 mstore      //[to]
+    0x20 mstore                  //[]
+    0x40 0x00 sha3               //[slot]
+    dup1                         //[slot, slot]
+    sload                        //[balance, slot]
+    0x60 mload                   //[amt, balance, slot]
+    add                          //[newBalance, slot]
+    swap1                        //[slot, newBalance]
+    sstore
+
+    0x01 0x00 mstore             //return true
+    0x20 0x00 return
+
+    revertTx:
+        __ERROR(INSUFFICIENT_BALANCE)
+        0x04 0x00 revert
+
+}
+
+#define macro MAIN() = takes (0) returns (0) {
+    //get the function signature
+    0x00 calldataload   //load first 32 byte from calldata and push to stack
+    0xE0                //PUSH 0xE0 (0xE0 = 224)
+    shr                 //shift right 224 bits (0xE0 = 224)
+
+    //compare the function signature to the expected signature
+    dup1 __FUNC_SIG(transfer) eq transfer jumpi
+    dup1 __FUNC_SIG(approve) eq approve jumpi
+    dup1 __FUNC_SIG(transferFrom) eq transferFrom jumpi
+    dup1 __FUNC_SIG(balanceOf) eq balanceOf jumpi
+    dup1 __FUNC_SIG(allowance) eq allowance jumpi
+    dup1 __FUNC_SIG(mint) eq mint jumpi
+    0x00 0x00 revert
+    
+    allowance:
+        0x24 calldataload   //[spender]
+        0x04 calldataload   //[owner, spender]
+        ALLOWANCE(0x00)
+
+        //return allowance
+        0x20 0x00 return
+    transferFrom:
+        0x24 calldataload   //[to]
+        0x44 calldataload   //[amount, to]
+        0x04 calldataload   //[owner, amount, to]
+        TRANSFER_FROM()
+
+        //return true
+        0x01 0x00 mstore
+        0x20 0x00 return
+    balanceOf:
+        balanceOf()
+    transfer:
+        //[amt, from, to]
+        0x04 calldataload   //[to]
+        caller              //[from, to]
+        0x24 calldataload   //[amt, from, to]
+        TRANSFER()
+
+        //return true
+        0x01 0x00 mstore
+        0x20 0x00 return
+    approve:
+        0x24 calldataload   //[amount]
+        0x04 calldataload   //[spender, amount]
+        APPROVE()
+
+        //return true
+        0x01 0x00 mstore
+        0x20 0x00 return
+    mint:
+        MINT()
+
+}
