@@ -60,76 +60,6 @@
     sstore          //stores the new balance to the slot
 }
 
-#define macro TRANSFER() = takes(0) returns(1) {
-    0x24 calldataload   //loads the amount from calldata
-    
-
-    caller          //msg.sender
-    0x20            //push 0x20 onto the stack
-    mstore          //stores address to memory at 0x20
-
-    [balances]
-    0x00            //push 00
-    mstore          //save slot at 00 memory offset
-                    //[0x1, address] - in memory
-
-    0x40            //size of the mem to hash (0x40 = 64 bytes)
-    0x00            //memory offset to start hashing from (0x00)
-    sha3            //keccak256 hash of the data 
-                    //[hash of the balances_slot.userAddress]
-    dup1            //duplicate the hash
-    0x00
-    mstore          //save the hash to memory at 0x00
-                    //[hash, amountToSend]
-    sload           //[balance, amountToSend]
-        
-    dup1            //[balance, balance, amountToSend]
-    0x20
-    mstore          //saves the balance to memory
-                    //[balance, amountToSend]
-    lt revertTx jumpi //if balance < amountToSend jump to revertTx
-
-    0x24 calldataload   //loads the amount from calldata //[amount]
-    0x20 mload      //load user balance from memory  //[balance, amount]
-    sub            //subtract amount from balance //[balance - amount]
-                    //[newSenderBalance]
-    0x00 mload      //get caller balance slot
-                    //[senderSlot, newSenderBalance]       
-    sstore          //save new sender balance to slot
-                    
-    // update user2 balance
-    [balances]
-    0x00            //push 00
-    mstore          //save slot at 00 memory offset
-                    //[0x1, address] - in memory
-    0x04 calldataload //loads user2 address from calldata
-    0x20 mstore      //save user2 address to memory at 0x20
-
-    0x40
-    0x00
-    sha3            //get receiver balance slot
-    dup1            //[receiverSlot, receiverSlot]
-    sload           //[receiverBalance, receiverSlot]
-
-    0x24 calldataload   //loads the amount from calldata //[amount, receiverBalance, receiverSlot]
-    add             //add amount to receiverBalance //[amount + receiverBalance]
-                    //[newReceiverBalance, receiverSlot]
-    swap1           //[receiverSlot, newReceiverBalance]
-    sstore          //save new receiver balance
-
-    //return true
-    0x01 0x00 mstore
-    0x20 0x00 return
-
-    revertTx:
-    __ERROR(INSUFFICIENT_BALANCE) //[err_selector, ...]
-    0x00 mstore
-    
-    0x04        //revert with 4 bytes ERR signature
-    0x00
-    revert
-
-}
 
 #define macro ALLOWANCE(return_data_ptr) = takes(2) returns (1) {
     //[owner, spender]
@@ -255,6 +185,7 @@
 
     revertTx:
         __ERROR(INSUFFICIENT_BALANCE)
+        0x00 mstore
         0x04 0x00 revert
 
 }
@@ -297,7 +228,7 @@
         0x04 calldataload   //[to]
         caller              //[from, to]
         0x24 calldataload   //[amt, from, to]
-        TRANSFER()
+        _TRANSFER()
 
         //return true
         0x01 0x00 mstore
